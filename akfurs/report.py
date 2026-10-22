@@ -72,6 +72,10 @@ def build_answers(dataset):
     }
 
 
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def validate(answers):
     missing = [key for key in REQUIRED_KEYS if key not in answers]
     if missing:
@@ -84,22 +88,44 @@ def validate(answers):
     for key in ('q1_unique_orders', 'q1_unique_order_lines',
                 'q2b_unidentified_payments_count', 'q2b_unidentified_payments_sum_rub',
                 'q3_price_violation_lines_total'):
-        if not isinstance(answers[key], int):
-            raise TypeError('{} must be int, got {}'.format(key, type(answers[key]).__name__))
-        if answers[key] < 0:
+        value = answers[key]
+        if not _is_int(value):
+            raise TypeError('{} must be int, got {}'.format(key, type(value).__name__))
+        if value < 0:
             raise ValueError('{} must be non-negative'.format(key))
 
-    if not isinstance(answers['q3_price_violation_lines_by_manager'], dict):
+    breakdown = answers['q3_price_violation_lines_by_manager']
+    if not isinstance(breakdown, dict):
         raise TypeError('q3_price_violation_lines_by_manager must be a dict')
-    for manager, value in answers['q3_price_violation_lines_by_manager'].items():
-        if not isinstance(manager, str) or not isinstance(value, int):
-            raise TypeError('bad manager entry: {!r}'.format((manager, value)))
+    for manager, value in breakdown.items():
+        if not isinstance(manager, str):
+            raise TypeError('manager name must be a string: {!r}'.format(manager))
+        if not manager.strip():
+            raise ValueError('manager name must be non-empty')
+        if not _is_int(value):
+            raise TypeError('manager count must be int: {!r}'.format((manager, value)))
+        if value < 0:
+            raise ValueError('manager count must be non-negative: {!r}'.format((manager, value)))
+    if sum(breakdown.values()) != answers['q3_price_violation_lines_total']:
+        raise ValueError('q3 breakdown must sum to q3_price_violation_lines_total')
 
-    for key in ('q2a_paid_orders_without_payment', 'q4_chats_meeting_before_price'):
-        if not isinstance(answers[key], list):
-            raise TypeError('{} must be a list'.format(key))
-        if answers[key] != sorted(answers[key]):
-            raise ValueError('{} must be sorted'.format(key))
+    q2a = answers['q2a_paid_orders_without_payment']
+    if not isinstance(q2a, list):
+        raise TypeError('q2a_paid_orders_without_payment must be a list')
+    if any(not _is_int(item) for item in q2a):
+        raise TypeError('q2a_paid_orders_without_payment must contain ints')
+    if any(item < 0 for item in q2a):
+        raise ValueError('q2a_paid_orders_without_payment must contain non-negative ints')
+    if q2a != sorted(q2a):
+        raise ValueError('q2a_paid_orders_without_payment must be sorted')
+
+    q4 = answers['q4_chats_meeting_before_price']
+    if not isinstance(q4, list):
+        raise TypeError('q4_chats_meeting_before_price must be a list')
+    if any(not isinstance(item, str) or not item.strip() for item in q4):
+        raise TypeError('q4_chats_meeting_before_price must contain non-empty strings')
+    if q4 != sorted(q4):
+        raise ValueError('q4_chats_meeting_before_price must be sorted')
 
     if not isinstance(answers['run_command'], str) or not answers['run_command'].strip():
         raise ValueError('run_command must be a non-empty string')

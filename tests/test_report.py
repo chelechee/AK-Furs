@@ -129,3 +129,59 @@ def test_real_pipeline_output_satisfies_contract(data_dir):
         sorted(answers['q4_chats_meeting_before_price'])
     assert sum(answers['q3_price_violation_lines_by_manager'].values()) == \
         answers['q3_price_violation_lines_total']
+
+
+def test_boolean_counter_is_rejected():
+    answers = valid_answers()
+    answers['q1_unique_orders'] = True
+    with pytest.raises(TypeError):
+        validate(answers)
+
+
+def test_q2a_elements_must_be_integers():
+    answers = valid_answers()
+    answers['q2a_paid_orders_without_payment'] = [2, '7']
+    with pytest.raises(TypeError):
+        validate(answers)
+
+
+def test_q2a_elements_must_be_non_negative():
+    answers = valid_answers()
+    answers['q2a_paid_orders_without_payment'] = [-1, 2]
+    with pytest.raises(ValueError):
+        validate(answers)
+
+
+def test_q4_elements_must_be_non_empty_strings():
+    answers = valid_answers()
+    answers['q4_chats_meeting_before_price'] = ['C0001', '']
+    with pytest.raises(TypeError):
+        validate(answers)
+
+
+def test_q4_elements_must_be_strings():
+    answers = valid_answers()
+    answers['q4_chats_meeting_before_price'] = ['C0001', 2]
+    with pytest.raises(TypeError):
+        validate(answers)
+
+
+def test_q3_counts_must_be_non_negative():
+    answers = valid_answers()
+    answers['q3_price_violation_lines_by_manager'] = {'Марина Котова': -1}
+    with pytest.raises(ValueError):
+        validate(answers)
+
+
+def test_q3_manager_name_must_be_non_empty():
+    answers = valid_answers()
+    answers['q3_price_violation_lines_by_manager'] = {'   ': 3}
+    with pytest.raises(ValueError):
+        validate(answers)
+
+
+def test_q3_total_must_match_breakdown():
+    answers = valid_answers()
+    answers['q3_price_violation_lines_total'] = 4
+    with pytest.raises(ValueError):
+        validate(answers)
