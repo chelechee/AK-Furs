@@ -7,7 +7,7 @@
 ## Требования к окружению
 
 - Python 3.10 или новее (проверено на 3.14).
-- Зависимости: `openpyxl` для чтения книги Excel; `pytest` для тестов.
+- Зависимости: `openpyxl` для чтения книги Excel; `pytest` для тестов; `python-docx` для обновления даты в Q5.
 - Установка: `pip install -r requirements.txt`.
 
 ## Запуск
@@ -51,6 +51,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\run.ps1 "C:\Users\ashr0\Do
 ```
 
 Можно и просто положить файлы в `data/` и запустить команду из поля `run_command`.
+
+Дата в `Q5.docx` и `Q5.md` обновляется на текущую командой:
+
+```powershell
+python tools/refresh_q5_date.py
+```
 
 При успехе команда печатает путь, размер и SHA-256:
 
@@ -137,6 +143,7 @@ python -m pytest tests -q
 | `akfurs/chats.py` | классификация реплик и поиск «цена раньше приглашения», Q4 |
 | `akfurs/report.py` | сборка схемы, валидатор, текст `notes` |
 | `tools/stress.py` | генератор стресс-наборов для проверки устойчивости |
+| `tools/refresh_q5_date.py` | обновление даты в `Q5.md` и `Q5.docx` на текущую |
 
 ## Результаты на исходной выгрузке
 
