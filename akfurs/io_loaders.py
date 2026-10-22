@@ -231,10 +231,15 @@ def parse_chat(text, filename):
     client_match = re.search(r'клиент\s+([^|]+?)\s*\|', header)
 
     messages = []
-    for line in lines[1:]:
-        match = _MESSAGE_RE.match(line.strip())
-        if not match:
+    for line_number, line in enumerate(lines[1:], start=2):
+        text = line.strip()
+        if not text:
             continue
+        match = _MESSAGE_RE.match(text)
+        if not match:
+            raise ValueError(
+                'unrecognized message line {} in {}: {!r}'.format(
+                    line_number, filename, text))
         stamp = parse_datetime('{} {}'.format(match.group(1), match.group(2)))
         messages.append({'at': stamp, 'sender': match.group(3), 'text': match.group(4).strip()})
 

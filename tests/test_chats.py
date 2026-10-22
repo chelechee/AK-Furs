@@ -85,6 +85,15 @@ def test_violation_count(chats):
     assert len(solve_q4(chats)) == 22
 
 
+def test_flagged_chat_ids_match_manual_audit(chats):
+    assert solve_q4(chats) == [
+        'C0010', 'C0024', 'C0033', 'C0037', 'C0042', 'C0060', 'C0061',
+        'C0065', 'C0066', 'C0068', 'C0070', 'C0079', 'C0081', 'C0088',
+        'C0090', 'C0091', 'C0092', 'C0093', 'C0102', 'C0133', 'C0135',
+        'C0136',
+    ]
+
+
 def test_minimal_synthetic_violation():
     from datetime import datetime
     chat = {

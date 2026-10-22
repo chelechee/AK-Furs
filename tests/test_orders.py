@@ -70,6 +70,7 @@ def test_dedupe_tie_break_is_deterministic():
     second = dedupe(build_lines(list(reversed(rows)), MANAGERS, ARTICLES))
     assert len(first) == 1 and len(second) == 1
     assert first[0].status == STATUS_PAID
+    assert second[0].status == STATUS_IN_PROGRESS
 
 
 def test_dedupe_keeps_different_line_numbers():

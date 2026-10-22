@@ -88,3 +88,9 @@ def test_chat_orders_exist_in_crm(data_dir):
 def test_parse_chat_rejects_file_without_header():
     with pytest.raises(ValueError):
         parse_chat('пустой файл', 'x.txt')
+
+
+def test_parse_chat_rejects_unknown_message_line():
+    text = 'Чат C9999 | заказ A-1 | менеджер X | клиент Y\nэто не сообщение'
+    with pytest.raises(ValueError, match='unrecognized message'):
+        parse_chat(text, 'x.txt')
