@@ -48,13 +48,33 @@ data/04_client_chats.zip
 
 Перед выводом результат проходит валидатор: проверяются состав ключей, типы, неотрицательность счётчиков, сортировка массивов и непустые `run_command` / `notes`.
 
+### Как прочитать `notes` в PowerShell 5.1
+
+`answers.json` записан в UTF-8 без BOM. `Get-Content` в PowerShell 5.1 по умолчанию читает файл как ANSI, поэтому кириллица в `notes` выглядит как `РќРѕРјРµСЂ...`. Это не повреждение JSON, а кодировка чтения. Используйте:
+
+```powershell
+(Get-Content .\answers.json -Encoding UTF8 -Raw | ConvertFrom-Json).notes
+```
+
+Если консоль всё равно не отображает кириллицу, скопируйте текст в буфер:
+
+```powershell
+(Get-Content .\answers.json -Encoding UTF8 -Raw | ConvertFrom-Json).notes | Set-Clipboard
+```
+
+Либо прочитайте через Python:
+
+```powershell
+python -c "import json; print(json.load(open('answers.json', encoding='utf-8'))['notes'])"
+```
+
 ## Тесты
 
 ```
 python -m pytest tests -q
 ```
 
-143 теста, покрытие пакета `akfurs` — 95 % строк (93 % ветвей). Набор включает пять типов проверок:
+144 теста, покрытие пакета `akfurs` — 95 % строк (93 % ветвей). Набор включает пять типов проверок:
 
 - юнит-тесты разбора номеров, дат, цен, скидок и статусов;
 - интеграционные тесты на реальной выгрузке: дедупликация, границы периодов прайса, извлечение номеров из назначений;
