@@ -1,0 +1,27 @@
+# Исходные данные и производные копии не публикуются
+data/
+stress/
+01_crm_orders_export.csv
+02_bank_statement_rub.csv
+03_catalog_prices_reference.xlsx
+04_client_chats.zip
+ТЗ — тестовое задание AI-ассистент AK Furs.docx
+
+# Результат прогона генерируется заново
+answers.json
+
+# Служебные материалы разработки
+PLAN.md
+SKILLS.md
+REQUIREMENTS.md
+VULNERABILITIES.md
+tools/audit_review.py
+tools/verify_answers.py
+
+# Окружение и кэши
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
