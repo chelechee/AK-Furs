@@ -12,6 +12,7 @@ CRM_FILENAME = '01_crm_orders_export.csv'
 BANK_FILENAME = '02_bank_statement_rub.csv'
 PRICEBOOK_FILENAME = '03_catalog_prices_reference.xlsx'
 CHATS_FILENAME = '04_client_chats.zip'
+DATA_FILES = (CRM_FILENAME, BANK_FILENAME, PRICEBOOK_FILENAME, CHATS_FILENAME)
 
 _MESSAGE_RE = re.compile(
     r'\[(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)\]\s*(Клиент|Менеджер)\s*:\s*(.*)'
@@ -249,10 +250,23 @@ def parse_chat(text, filename):
     }
 
 
+def find_data_dir(root):
+    root = Path(root)
+    if not root.is_dir():
+        raise NotADirectoryError('data directory not found: {}'.format(root))
+
+    candidates = [
+        directory for directory in [root] + [path for path in root.rglob('*') if path.is_dir()]
+        if all((directory / name).is_file() for name in DATA_FILES)
+    ]
+    if not candidates:
+        raise FileNotFoundError(
+            'data files not found under {}: {}'.format(root, ', '.join(DATA_FILES)))
+    return sorted(candidates, key=lambda path: (len(path.parts), str(path)))[0]
+
+
 def load_dataset(data_dir):
-    directory = Path(data_dir)
-    if not directory.is_dir():
-        raise NotADirectoryError('data directory not found: {}'.format(directory))
+    directory = find_data_dir(data_dir)
     return {
         'crm': read_crm(directory / CRM_FILENAME),
         'bank': read_bank(directory / BANK_FILENAME),
