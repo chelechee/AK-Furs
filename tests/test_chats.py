@@ -60,8 +60,19 @@ def test_client_messages_are_ignored(chats):
             {'at': None, 'sender': 'Клиент', 'text': 'А сколько стоит? 300 000 ₽?'},
         ],
     }
-    with pytest.raises(ValueError):
-        solve_q4([chat])
+    assert solve_q4([chat]) == []
+
+
+def test_chat_without_invitation_is_ignored():
+    from datetime import datetime
+    chat = {
+        'chat_id': 'C9998',
+        'messages': [
+            {'at': datetime(2025, 1, 1, 10, 0), 'sender': 'Менеджер',
+             'text': 'Цена — 50 000 ₽.'},
+        ],
+    }
+    assert solve_q4([chat]) == []
 
 
 def test_flagged_chats_are_sorted_and_unique(chats):

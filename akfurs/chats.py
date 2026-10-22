@@ -50,7 +50,7 @@ def solve_q4(chats):
     for chat in chats:
         first_invitation, first_price = first_mentions(chat)
         if first_invitation is None:
-            raise ValueError('no invitation found in {}'.format(chat['chat_id']))
+            continue
         if first_price is None or first_invitation < first_price:
             flagged.append(chat['chat_id'])
     return sorted(flagged)
