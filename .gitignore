@@ -17,6 +17,7 @@ REQUIREMENTS.md
 VULNERABILITIES.md
 tools/audit_review.py
 tools/verify_answers.py
+handoff/
 
 # Окружение и кэши
 __pycache__/
