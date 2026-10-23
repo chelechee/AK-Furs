@@ -28,7 +28,7 @@ _STATUS_ALIASES = {
 def order_no(value):
     raw = str(value).strip()
     match = re.fullmatch(
-        r'(?:(?:заказ)\s*|№\s*)?(?:[aа]\s*[-–—]?\s*)?0*(\d+)',
+        r'(?:(?:заказ)\s*|№\s*)?(?:[aа]\s*[-–—/\\]?\s*)?0*(\d+)',
         raw,
         flags=re.IGNORECASE,
     )
@@ -139,6 +139,17 @@ def parse_money(value):
         raise ValueError('unknown money format: {!r}'.format(value))
 
     return number * multiplier
+
+
+_QUANTITY_RE = re.compile(r'(\d+)\s*(?:шт\.?|ед\.?)?', re.IGNORECASE)
+
+
+def parse_quantity(value):
+    raw = str(value).strip()
+    match = _QUANTITY_RE.fullmatch(raw)
+    if not match:
+        raise ValueError('invalid quantity format: {!r}'.format(value))
+    return int(match.group(1))
 
 
 def parse_discount(value):

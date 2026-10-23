@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from akfurs.normalize import parse_date  # noqa: E402
+from akfurs.normalize import order_no, parse_date  # noqa: E402
 
 CRM = '01_crm_orders_export.csv'
 BANK = '02_bank_statement_rub.csv'
@@ -201,17 +201,33 @@ def mutation_add_cheap_line(src, dest):
     dest = _prepare(src, dest)
     shutil.copyfile(Path(src) / BANK, dest / BANK)
     rows = _crm(src)
-    rows.append(['A-00001', '9', '2025-05-05', 'CL-00001', 'Вероника Белова', 'Сайт',
-                 'CHN-PAL-01', '1', '1000', 'RUB', '', 'Оплачен', '', '2026-10-02 00:00'])
-    _write(dest / CRM, rows)
+    positions = {name: index for index, name in enumerate(rows[0])}
+    base = rows[1]
+    order_at = positions['Номер заказа']
+    line_at = positions['№ строки']
+    article_order = order_no(base[order_at])
+    line_numbers = [int(row[line_at]) for row in rows[1:]
+                    if order_no(row[order_at]) == article_order]
+    added = list(base)
+    added[line_at] = str(max(line_numbers, default=0) + 1)
+    added[positions['Цена за ед.']] = '1000'
+    added[positions['Скидка']] = ''
+    added[positions['Статус']] = 'Оплачен'
+    added[positions['Комментарий']] = ''
+    added[positions['Выгружено']] = '2026-10-02 00:00'
+    _write(dest / CRM, rows + [added])
 
 
 def broken_ambiguous_payment(src, dest):
     dest = _prepare(src, dest)
     shutil.copyfile(Path(src) / CRM, dest / CRM)
     bank = _bank(src)
+    crm = _crm(src)
+    order_at = crm[0].index('Номер заказа')
+    known = sorted({order_no(row[order_at]) for row in crm[1:]})
+    first, second = known[:2]
     bank.append(['01.10.2026', '12:00', '1 000,00', 'RUR', 'Поступление',
-                 'Спорный платёж', 'заказ 12 и 34'])
+                 'Спорный платёж', 'заказ {} и {}'.format(first, second)])
     _write(dest / BANK, bank, encoding='cp1251')
 
 

@@ -21,9 +21,9 @@ from akfurs.normalize import (
 
 def test_order_no_collapses_all_spellings():
     for raw in ('A-00075', 'А-75', 'a-75', 'A75', ' a-372', 'A-00922',
-                'A–75', 'A 75', '№ 00075', 'заказ 75'):
+                'A–75', 'A 75', '№ 00075', 'заказ 75', 'A/00872', 'a/75'):
         assert isinstance(order_no(raw), int)
-    assert {order_no(x) for x in ('A-00075', 'А-75', 'a-75', 'A75')} == {75}
+    assert {order_no(x) for x in ('A-00075', 'А-75', 'a-75', 'A75', 'A/00075')} == {75}
 
 
 def test_order_no_rejects_values_without_digits():
@@ -34,6 +34,26 @@ def test_order_no_rejects_values_without_digits():
 def test_order_no_rejects_unrecognized_composite_identifiers():
     with pytest.raises(ValueError):
         order_no('A-75/1')
+
+
+@pytest.mark.parametrize('raw,expected', [
+    ('1', 1),
+    ('2', 2),
+    ('3 шт.', 3),
+    ('1 шт', 1),
+    ('4 ед.', 4),
+    ('10', 10),
+])
+def test_parse_quantity_accepts_unit_labels(raw, expected):
+    from akfurs.normalize import parse_quantity
+    assert parse_quantity(raw) == expected
+
+
+@pytest.mark.parametrize('raw', ['', 'шт', '1,5', 'две', '1 шт. и ещё'])
+def test_parse_quantity_rejects_unknown_formats(raw):
+    from akfurs.normalize import parse_quantity
+    with pytest.raises(ValueError):
+        parse_quantity(raw)
 
 
 @pytest.mark.parametrize('raw,expected', [

@@ -11,6 +11,7 @@ from .normalize import (
     parse_date,
     parse_datetime,
     parse_money,
+    parse_quantity,
     unit_price_after_discount,
 )
 
@@ -46,7 +47,7 @@ def build_lines(records, manager_map, article_map):
         article = article_map.get(article_raw, article_raw)
 
         price = parse_money(row['Цена за ед.'])
-        qty = int(str(row['Кол-во']).strip())
+        qty = parse_quantity(row['Кол-во'])
         if qty <= 0:
             raise ValueError('quantity must be positive for order line {!r}/{!r}'.format(
                 row['Номер заказа'], row['№ строки']))

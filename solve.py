@@ -10,6 +10,9 @@ from pathlib import Path
 from akfurs.io_loaders import load_dataset
 from akfurs.report import build_answers, validate
 
+DEFAULT_SOURCE = Path('data')
+DEFAULT_OUTPUT = Path('handoff') / 'answers.json'
+
 
 def _json_value(value, level=0, indent=2):
     """Serialize Decimal as an exact JSON number without converting via float."""
@@ -56,35 +59,47 @@ def _data_source(path):
     yield source
 
 
-def _run(argv):
+def _parse_args(argv):
     args = list(argv[1:])
-    out_path = None
+    out_path = DEFAULT_OUTPUT
     if '--out' in args:
         index = args.index('--out')
         if index + 1 >= len(args):
-            print('--out requires a path', file=sys.stderr)
-            return 2
-        out_path = args[index + 1]
+            raise SystemExit('--out requires a path')
+        out_path = Path(args[index + 1])
         del args[index:index + 2]
 
-    if len(args) != 1:
-        print('usage: python solve.py <data_dir_or_zip> [--out answers.json]', file=sys.stderr)
+    if len(args) > 1:
+        raise SystemExit('usage: python solve.py [data_dir_or_zip] [--out handoff/answers.json]')
+    source = Path(args[0]) if args else DEFAULT_SOURCE
+    return source, out_path
+
+
+def _run(argv):
+    try:
+        source, out_path = _parse_args(argv)
+    except SystemExit as error:
+        print(error, file=sys.stderr)
         return 2
 
-    with _data_source(args[0]) as data_dir:
+    with _data_source(source) as data_dir:
         dataset = load_dataset(data_dir)
     answers = validate(build_answers(dataset))
+    from tools.build_q5 import render_q5, write_q5
+
+    _, q5_markdown, q5_docx = render_q5(dataset)
     text = _json_value(answers, indent=2) + '\n'
 
-    if out_path:
-        with open(out_path, 'w', encoding='utf-8', newline='\n') as handle:
-            handle.write(text)
-        digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
-        print('OK: {} written ({} bytes, SHA-256 {})'.format(
-            out_path, len(text.encode('utf-8')), digest))
-    else:
-        sys.stdout.write(text)
-        print('OK: JSON written to stdout', file=sys.stderr)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    q5_markdown_path = out_path.parent / 'Q5.md'
+    q5_docx_path = out_path.parent / 'Q5.docx'
+    with open(out_path, 'w', encoding='utf-8', newline='\n') as handle:
+        handle.write(text)
+    write_q5(q5_markdown_path, q5_docx_path, q5_markdown, q5_docx)
+    digest = hashlib.sha256(text.encode('utf-8')).hexdigest()
+    print('OK: {} written with Q5.md and Q5.docx ({} bytes, SHA-256 {})'.format(
+        out_path, len(text.encode('utf-8')), digest))
     return 0
 
 

@@ -3,7 +3,7 @@ param(
     [string]$Path = "data",
 
     [Parameter(Position = 1)]
-    [string]$Out = "answers.json"
+    [string]$Out = "handoff/answers.json"
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,5 +13,5 @@ if (Test-Path -LiteralPath $Path) {
     $Path = (Resolve-Path -LiteralPath $Path).Path
 }
 
-& python (Join-Path $root "solve.py") $Path --out $Out
+& python (Join-Path $root "solve.py") "$Path" --out "$Out"
 exit $LASTEXITCODE

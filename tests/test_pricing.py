@@ -19,15 +19,24 @@ def prepared(data_dir):
 
 
 def test_period_boundaries(prepared):
-    periods, _ = prepared
-    assert minimum_price(periods, 'CHN-PAL-01', date(2025, 6, 30)) == Decimal('60000')
-    assert minimum_price(periods, 'CHN-PAL-01', date(2025, 7, 1)) == Decimal('62000')
-    assert minimum_price(periods, 'CHN-PAL-01', date(2026, 7, 1)) == Decimal('69000')
+    periods = build_history([
+        {'article': 'X', 'valid_from': date(2025, 1, 1), 'valid_to': date(2025, 6, 30),
+         'recommended': 100, 'minimum': 60},
+        {'article': 'X', 'valid_from': date(2025, 7, 1), 'valid_to': date(2026, 6, 30),
+         'recommended': 120, 'minimum': 62},
+        {'article': 'X', 'valid_from': date(2026, 7, 1), 'valid_to': None,
+         'recommended': 140, 'minimum': 69},
+    ])
+    assert minimum_price(periods, 'X', date(2025, 6, 30)) == Decimal('60')
+    assert minimum_price(periods, 'X', date(2025, 7, 1)) == Decimal('62')
+    assert minimum_price(periods, 'X', date(2026, 7, 1)) == Decimal('69')
 
 
 def test_last_period_is_open_ended(prepared):
     periods, _ = prepared
-    assert minimum_price(periods, 'CHN-PAL-01', date(2027, 1, 1)) == Decimal('69000')
+    article = next(name for name, entries in periods.items() if entries[-1].valid_to is None)
+    last = periods[article][-1]
+    assert minimum_price(periods, article, date(9999, 12, 31)) == last.minimum
 
 
 def test_missing_period_raises(prepared):
@@ -56,10 +65,13 @@ def test_cancelled_lines_are_ignored(prepared):
 
 def test_violation_is_detected_and_grouped(prepared):
     periods, _ = prepared
-    cheap = SimpleNamespace(article='CHN-PAL-01', created=date(2025, 5, 5),
-                            status=STATUS_PAID, unit_after=Decimal('50000'), manager='A')
-    fine = SimpleNamespace(article='CHN-PAL-01', created=date(2025, 5, 5),
-                           status=STATUS_PAID, unit_after=Decimal('60000'), manager='B')
+    article = next(iter(periods))
+    created = periods[article][0].valid_from
+    threshold = minimum_price(periods, article, created)
+    cheap = SimpleNamespace(article=article, created=created,
+                            status=STATUS_PAID, unit_after=threshold - 1, manager='A')
+    fine = SimpleNamespace(article=article, created=created,
+                           status=STATUS_PAID, unit_after=threshold, manager='B')
     assert solve_q3([cheap, fine], periods) == (1, {'A': 1})
 
 

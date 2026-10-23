@@ -21,16 +21,13 @@ def test_changing_hidden_sheet_minimum_changes_q3(data_dir, tmp_path):
     lines = build_clean_lines(dataset['pricebook'], dataset['crm'])
     before_total, _ = solve_q3(lines, periods)
 
-    target = next(
-        line for line in lines
-        if line.status != STATUS_CANCELLED
-        and line.unit_after < minimum_price(periods, line.article, line.created)
-    )
+    target = next(line for line in lines if line.status != STATUS_CANCELLED)
 
     path = data_copy / '03_catalog_prices_reference.xlsx'
     workbook = openpyxl.load_workbook(path)
     sheet, header_row = _sheet_with_cells(
         workbook, ('Артикул', 'Действует с', 'Действует по'))
+    sheet.sheet_state = 'hidden'
     positions = _index_map(sheet, header_row)
     article_at = _column(positions, 'Артикул')
     from_at = _column(positions, 'Действует с')
@@ -45,7 +42,7 @@ def test_changing_hidden_sheet_minimum_changes_q3(data_dir, tmp_path):
             continue
         if row[to_at].value is not None and _as_date(row[to_at].value) < target.created:
             continue
-        row[minimum_at].value = float(target.unit_after)
+        row[minimum_at].value = float(target.unit_after + 1)
         changed += 1
     assert changed == 1
     workbook.save(path)
@@ -55,5 +52,5 @@ def test_changing_hidden_sheet_minimum_changes_q3(data_dir, tmp_path):
     after_lines = build_clean_lines(after_dataset['pricebook'], after_dataset['crm'])
     after_total, _ = solve_q3(after_lines, after_periods)
 
-    assert after_total < before_total
-    assert minimum_price(after_periods, target.article, target.created) >= target.unit_after
+    assert after_total > before_total
+    assert minimum_price(after_periods, target.article, target.created) > target.unit_after

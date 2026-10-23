@@ -192,6 +192,7 @@ def test_q3_total_must_match_breakdown():
 def test_fractional_payment_sum_is_preserved_as_exact_json_number(data_dir):
     import json
     dataset = load_dataset(data_dir)
+    baseline_sum = build_answers(dataset)['q2b_unidentified_payments_sum_rub']
     dataset['bank'].append({
         'date_raw': '01.10.2026',
         'time_raw': '12:00',
@@ -202,10 +203,11 @@ def test_fractional_payment_sum_is_preserved_as_exact_json_number(data_dir):
         'purpose': 'payment without any CRM order reference',
     })
     answers = validate(build_answers(dataset))
-    assert answers['q2b_unidentified_payments_sum_rub'] == Decimal('3437101.49')
+    expected = baseline_sum + Decimal('1.49')
+    assert answers['q2b_unidentified_payments_sum_rub'] == expected
     serialized = _json_value(answers)
     decoded = json.loads(serialized, parse_float=Decimal)
-    assert decoded['q2b_unidentified_payments_sum_rub'] == Decimal('3437101.49')
+    assert decoded['q2b_unidentified_payments_sum_rub'] == expected
 
 
 def test_validator_rejects_non_finite_payment_sum():

@@ -1,6 +1,9 @@
 import csv
 import io
+import os
 import re
+import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 
@@ -8,15 +11,35 @@ import openpyxl
 
 from .normalize import parse_datetime
 
-CRM_FILENAME = '01_crm_orders_export.csv'
-BANK_FILENAME = '02_bank_statement_rub.csv'
-PRICEBOOK_FILENAME = '03_catalog_prices_reference.xlsx'
-CHATS_FILENAME = '04_client_chats.zip'
-DATA_FILES = (CRM_FILENAME, BANK_FILENAME, PRICEBOOK_FILENAME, CHATS_FILENAME)
+ROLE_CRM = 'crm'
+ROLE_BANK = 'bank'
+ROLE_PRICEBOOK = 'pricebook'
+ROLE_CHATS = 'chats'
+ROLES = (ROLE_CRM, ROLE_BANK, ROLE_PRICEBOOK, ROLE_CHATS)
+
+SKIPPED_DIRECTORIES = frozenset({
+    '.git', '.hg', '.svn', '.venv', 'venv', '__pycache__', '.pytest_cache',
+    '.mypy_cache', '.ruff_cache', 'handoff', 'employer_package',
+})
+
+CRM_REQUIRED = (
+    'Номер заказа', '№ строки', 'Дата создания', 'Клиент', 'Менеджер', 'Источник',
+    'Артикул', 'Кол-во', 'Цена за ед.', 'Валюта', 'Скидка', 'Статус',
+    'Комментарий', 'Выгружено',
+)
+
+PRICEBOOK_TABLES = (
+    ('Артикул', 'Наименование'),
+    ('Старый артикул', 'Новый артикул'),
+    ('Артикул', 'Действует с', 'Действует по'),
+    ('Каноническое имя', 'Варианты написания в CRM'),
+)
 
 _MESSAGE_RE = re.compile(
     r'\[(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}(?::\d{2})?)\]\s*(Клиент|Менеджер)\s*:\s*(.*)'
 )
+_CHAT_HEADER_RE = re.compile(r'Чат\s+(C\d+)')
+_RAR_SIGNATURES = (b'Rar!\x1a\x07\x00', b'Rar!\x1a\x07\x01\x00')
 
 _BANK_COLUMNS = {
     'date_raw': 'Дата операции',
@@ -48,17 +71,48 @@ def detect_delimiter(text):
         return ';'
 
 
+def _header_names(row):
+    return {str(value).strip() for value in row if str(value).strip()}
+
+
+def _find_csv_header(text, required, description, max_lines=50):
+    lines = text.splitlines()
+    for index in range(min(len(lines), max_lines)):
+        if not lines[index].strip():
+            continue
+        delimiter = detect_delimiter('\n'.join(lines[index:index + 5]))
+        try:
+            header = next(csv.reader([lines[index]], delimiter=delimiter))
+        except (csv.Error, StopIteration):
+            continue
+        if set(required).issubset(_header_names(header)):
+            return index, delimiter
+    missing = [name for name in required]
+    raise ValueError('{} header not found (expected columns: {})'.format(
+        description, ', '.join(missing)))
+
+
 def read_crm(path):
     text = decode_bytes(Path(path).read_bytes())
-    delimiter = detect_delimiter(text)
+    header_index, delimiter = _find_csv_header(text, CRM_REQUIRED, 'CRM orders export')
     with io.StringIO(text) as handle:
-        return list(csv.DictReader(handle, delimiter=delimiter))
+        for _ in range(header_index):
+            next(handle)
+        reader = csv.DictReader(handle, delimiter=delimiter, skipinitialspace=True)
+        rows = []
+        for row in reader:
+            if not any(str(value or '').strip() for value in row.values()):
+                continue
+            rows.append({str(key).strip(): (value if value is not None else '')
+                         for key, value in row.items() if key is not None})
+        return rows
 
 
 def read_bank(path):
     text = decode_bytes(Path(path).read_bytes())
+    header_index, delimiter = _find_csv_header(
+        text, tuple(_BANK_COLUMNS[label] for label in _BANK_REQUIRED), 'bank statement')
     lines = text.splitlines()
-    header_index, delimiter = _find_bank_header(lines)
     header = next(csv.reader([lines[header_index]], delimiter=delimiter))
     positions = {name.strip(): index for index, name in enumerate(header) if name.strip()}
 
@@ -77,13 +131,6 @@ def read_bank(path):
             record[key] = row[index].strip() if index is not None and index < len(row) else ''
         records.append(record)
     return records
-
-
-def _find_bank_header(lines):
-    for index, line in enumerate(lines):
-        if 'Дата операции' in line and 'Назначение платежа' in line:
-            return index, detect_delimiter(line)
-    raise ValueError('bank header row not found')
 
 
 def _row_with_cells(worksheet, required):
@@ -124,7 +171,7 @@ def _value(row, index, default=None):
 
 
 def read_pricebook(path):
-    workbook = openpyxl.load_workbook(path, data_only=True)
+    workbook = openpyxl.load_workbook(io.BytesIO(Path(path).read_bytes()), data_only=True)
 
     catalog_sheet, catalog_header = _sheet_with_cells(workbook, ('Артикул', 'Наименование'))
     positions = _index_map(catalog_sheet, catalog_header)
@@ -208,20 +255,125 @@ def read_pricebook(path):
 def read_chats(path):
     chats = []
     seen_ids = set()
-    with zipfile.ZipFile(path) as archive:
-        for info in archive.infolist():
-            if not info.filename.lower().endswith('.txt'):
-                continue
-            try:
-                text = archive.read(info).decode('utf-8-sig')
-            except UnicodeDecodeError as error:
-                raise ValueError('chat file is not valid UTF-8: {}'.format(info.filename)) from error
-            chat = parse_chat(text, info.filename)
-            if chat['chat_id'] in seen_ids:
-                raise ValueError('duplicate chat ID in archive: {}'.format(chat['chat_id']))
-            seen_ids.add(chat['chat_id'])
-            chats.append(chat)
-    return chats
+    path = Path(path)
+    entries = []
+    if path.is_dir():
+        for member in sorted(path.rglob('*')):
+            if member.is_file() and member.suffix.lower() == '.txt' \
+                    and _is_loose_chat_file(member):
+                entries.append((str(member.relative_to(path)), member.read_bytes()))
+    elif zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            entries = [(info.filename, archive.read(info))
+                       for info in archive.infolist()
+                       if not info.is_dir() and info.filename.lower().endswith('.txt')]
+    elif _is_rar_file(path):
+        entries = [(name, _read_rar_member(path, name))
+                   for name in _rar_member_names(path)
+                   if name.lower().endswith('.txt')]
+    else:
+        raise ValueError('chat input must be a ZIP/RAR archive or a directory of chat .txt files')
+
+    for filename, raw in entries:
+        try:
+            text = raw.decode('utf-8-sig')
+        except UnicodeDecodeError as error:
+            raise ValueError('chat file is not valid UTF-8: {}'.format(filename)) from error
+        chat = parse_chat(text, filename)
+        if chat['chat_id'] in seen_ids:
+            raise ValueError('duplicate chat ID in archive: {}'.format(chat['chat_id']))
+        seen_ids.add(chat['chat_id'])
+        chats.append(chat)
+    if not chats:
+        raise ValueError('no chat files found in {}'.format(path.name))
+    return sorted(chats, key=lambda chat: chat['chat_id'])
+
+
+def _is_loose_chat_file(path):
+    """Identify an individual chat export without claiming arbitrary .txt files."""
+    try:
+        first_line = decode_bytes(Path(path).read_bytes()).splitlines()[:1]
+    except (OSError, UnicodeError):
+        return False
+    return bool((first_line and _CHAT_HEADER_RE.search(first_line[0]))
+                or re.fullmatch(r'C\d+\.txt', Path(path).name, re.IGNORECASE))
+
+
+def _unrar_executable():
+    configured = os.environ.get('UNRAR_TOOL')
+    candidates = [configured] if configured else []
+    candidates.extend(shutil.which(name) for name in ('UnRAR.exe', 'unrar.exe', 'unrar'))
+    for variable in ('ProgramFiles', 'ProgramFiles(x86)'):
+        base = os.environ.get(variable)
+        if base:
+            candidates.append(str(Path(base) / 'WinRAR' / 'UnRAR.exe'))
+    local = os.environ.get('LOCALAPPDATA')
+    if local:
+        candidates.append(str(Path(local) / 'Programs' / 'WinRAR' / 'UnRAR.exe'))
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
+    raise FileNotFoundError(
+        'RAR chat archive found, but UnRAR.exe is unavailable; install WinRAR or extract '
+        'the chat .txt files into the data directory')
+
+
+def _is_rar_file(path):
+    try:
+        with open(path, 'rb') as handle:
+            signature = handle.read(8)
+    except OSError:
+        return False
+    return any(signature.startswith(prefix) for prefix in _RAR_SIGNATURES)
+
+
+def _run_unrar(arguments, path):
+    executable = _unrar_executable()
+    try:
+        result = subprocess.run(
+            [executable, *arguments, str(path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError('could not read RAR chat archive {}'.format(Path(path).name)) from error
+    if result.returncode:
+        raise ValueError('UnRAR could not read chat archive {}'.format(Path(path).name))
+    return result.stdout
+
+
+def _decode_member_names(raw):
+    for encoding in ('utf-8-sig', 'mbcs', 'cp1251', 'cp866'):
+        try:
+            return raw.decode(encoding).splitlines()
+        except (LookupError, UnicodeDecodeError):
+            continue
+    raise ValueError('RAR archive member names use an unsupported encoding')
+
+
+def _rar_member_names(path):
+    output = _run_unrar(['lb', '-p-'], path)
+    return [name.strip() for name in _decode_member_names(output)
+            if name.strip() and not name.strip().endswith(('\\', '/'))]
+
+
+def _read_rar_member(path, member):
+    executable = _unrar_executable()
+    try:
+        result = subprocess.run(
+            [executable, 'p', '-inul', '-p-', str(path), member],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError('could not read chat file from RAR archive') from error
+    if result.returncode:
+        raise ValueError('could not extract a chat file from RAR archive')
+    return result.stdout
 
 
 def parse_chat(text, filename):
@@ -265,29 +417,153 @@ def parse_chat(text, filename):
     }
 
 
-def find_data_dir(root):
+def _is_pricebook(raw):
+    """Книга содержит все четыре таблицы; скрытые листы учитываются наравне с видимыми."""
+    try:
+        workbook = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
+    except Exception:
+        return False
+    try:
+        headers = [
+            _header_names(cell.value for cell in row)
+            for worksheet in workbook.worksheets
+            for row in worksheet.iter_rows(min_row=1, max_row=15)
+        ]
+    except Exception:
+        return False
+    finally:
+        workbook.close()
+    return all(any(set(required).issubset(header) for header in headers)
+               for required in PRICEBOOK_TABLES)
+
+
+def _is_chat_archive(raw):
+    """ZIP с текстовыми файлами, где заголовок первого файла имеет формат «Чат C0001 | …»."""
+    if not zipfile.is_zipfile(io.BytesIO(raw)):
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            for info in archive.infolist():
+                if info.is_dir() or not info.filename.lower().endswith('.txt'):
+                    continue
+                try:
+                    first_line = archive.read(info).decode('utf-8-sig').splitlines()[:1]
+                except UnicodeDecodeError:
+                    continue
+                if first_line and re.search(r'Чат\s+C\d+', first_line[0]):
+                    return True
+    except (zipfile.BadZipFile, OSError):
+        return False
+    return False
+
+
+def _is_rar_chat_archive(path):
+    for name in _rar_member_names(path):
+        if not name.lower().endswith('.txt'):
+            continue
+        try:
+            text = _read_rar_member(path, name).decode('utf-8-sig')
+        except UnicodeDecodeError:
+            continue
+        first_line = text.splitlines()[:1]
+        if first_line and _CHAT_HEADER_RE.search(first_line[0]):
+            return True
+    return False
+
+
+def identify_file(path):
+    """Роль файла по содержимому. Возвращает None, если файл не является входным."""
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+
+    if _is_pricebook(raw):
+        return ROLE_PRICEBOOK
+    if _is_chat_archive(raw):
+        return ROLE_CHATS
+    if any(raw.startswith(signature) for signature in _RAR_SIGNATURES):
+        return ROLE_CHATS if _is_rar_chat_archive(path) else None
+
+    try:
+        text = decode_bytes(raw)
+    except (UnicodeDecodeError, UnicodeError):
+        return None
+
+    matches = []
+    try:
+        _find_csv_header(text, CRM_REQUIRED, 'CRM orders export')
+    except ValueError:
+        pass
+    else:
+        matches.append(ROLE_CRM)
+    try:
+        _find_csv_header(text, tuple(_BANK_COLUMNS[label] for label in _BANK_REQUIRED),
+                         'bank statement')
+    except ValueError:
+        pass
+    else:
+        matches.append(ROLE_BANK)
+
+    if len(matches) > 1:
+        raise ValueError(
+            'file {} matches several input roles ({}); refusing to guess'.format(
+                path.name, ', '.join(matches)))
+    return matches[0] if matches else None
+
+
+def find_data_files(root):
+    """Находит четыре входных файла по содержимому. Имена и расширения не учитываются."""
     root = Path(root)
     if not root.is_dir():
         raise NotADirectoryError('data directory not found: {}'.format(root))
 
-    candidates = [
-        directory for directory in [root] + [path for path in root.rglob('*') if path.is_dir()]
-        if all((directory / name).is_file() for name in DATA_FILES)
-    ]
-    if not candidates:
+    candidates = {role: [] for role in ROLES}
+    unrecognized = []
+    has_loose_chats = False
+    for path in sorted(root.rglob('*')):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root)
+        if any(part in SKIPPED_DIRECTORIES for part in relative.parts[:-1]):
+            continue
+        if path.suffix.lower() == '.txt' and _is_loose_chat_file(path):
+            has_loose_chats = True
+            continue
+        role = identify_file(path)
+        if role is None:
+            unrecognized.append(str(relative))
+        else:
+            candidates[role].append(path)
+
+    if has_loose_chats:
+        candidates[ROLE_CHATS].append(root)
+
+    missing = [role for role in ROLES if not candidates[role]]
+    if missing:
+        details = 'missing: {}'.format(', '.join(missing))
+        if unrecognized:
+            details += '; not recognized: {}'.format(', '.join(unrecognized))
         raise FileNotFoundError(
-            'data files not found under {}: {}'.format(root, ', '.join(DATA_FILES)))
-    if len(candidates) > 1:
-        locations = ', '.join(str(path.relative_to(root)) for path in candidates)
-        raise ValueError('multiple complete datasets found under {}: {}'.format(root, locations))
-    return candidates[0]
+            'could not identify all input files by content under {} ({})'.format(root, details))
+
+    ambiguous = {role: paths for role, paths in candidates.items() if len(paths) > 1}
+    if ambiguous:
+        details = '; '.join('{}: {}'.format(
+            role, ', '.join(str(path.relative_to(root)) for path in paths))
+            for role, paths in ambiguous.items())
+        raise ValueError(
+            'multiple candidate input files found under {}: {}'.format(root, details))
+
+    return {role: paths[0] for role, paths in candidates.items()}
 
 
 def load_dataset(data_dir):
-    directory = find_data_dir(data_dir)
+    files = find_data_files(data_dir)
     return {
-        'crm': read_crm(directory / CRM_FILENAME),
-        'bank': read_bank(directory / BANK_FILENAME),
-        'pricebook': read_pricebook(directory / PRICEBOOK_FILENAME),
-        'chats': read_chats(directory / CHATS_FILENAME),
+        'crm': read_crm(files[ROLE_CRM]),
+        'bank': read_bank(files[ROLE_BANK]),
+        'pricebook': read_pricebook(files[ROLE_PRICEBOOK]),
+        'chats': read_chats(files[ROLE_CHATS]),
     }

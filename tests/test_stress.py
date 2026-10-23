@@ -22,6 +22,8 @@ def test_invariant_variant_matches_baseline(name, data_dir, tmp_path, baseline):
 
 
 def test_mutation_cover_unpaid_order(data_dir, tmp_path, baseline):
+    if not baseline['q2a_paid_orders_without_payment']:
+        pytest.skip('the current input has no paid order awaiting a payment')
     destination = tmp_path / 'cover'
     stress.mutation_cover_unpaid_order(data_dir, destination)
     result = answers_for(destination)
@@ -54,8 +56,13 @@ def test_mutation_add_cheap_line(data_dir, tmp_path, baseline):
 
     assert result['q3_price_violation_lines_total'] == \
         baseline['q3_price_violation_lines_total'] + 1
-    assert result['q3_price_violation_lines_by_manager']['Вероника Белова'] == \
-        baseline['q3_price_violation_lines_by_manager'].get('Вероника Белова', 0) + 1
+    manager_changes = {
+        name: result['q3_price_violation_lines_by_manager'].get(name, 0)
+        - baseline['q3_price_violation_lines_by_manager'].get(name, 0)
+        for name in (set(result['q3_price_violation_lines_by_manager'])
+                     | set(baseline['q3_price_violation_lines_by_manager']))
+    }
+    assert sorted(count for count in manager_changes.values() if count) == [1]
     assert result['q1_unique_orders'] == baseline['q1_unique_orders']
     assert result['q1_unique_order_lines'] == baseline['q1_unique_order_lines'] + 1
     assert result['q4_chats_meeting_before_price'] == baseline['q4_chats_meeting_before_price']

@@ -15,6 +15,7 @@ VULNERABILITIES.md
 tools/audit_review.py
 tools/verify_answers.py
 handoff/
+employer_package/
 
 # Окружение и кэши
 __pycache__/

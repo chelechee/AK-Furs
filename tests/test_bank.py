@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 import pytest
 
 from akfurs.bank import build_payments, extract_order_no, find_early_payments, solve_q2
@@ -67,35 +69,36 @@ def prepared(data_dir):
     lines = build_clean_lines(dataset['pricebook'], dataset['crm'])
     known = {line.order_no for line in lines}
     payments = build_payments(dataset['bank'], known)
-    return lines, known, payments
+    return lines, known, payments, dataset['bank']
 
 
 def test_only_inflows_are_loaded(prepared):
-    _, _, payments = prepared
-    assert len(payments) == 1168
+    _, _, payments, bank_rows = prepared
+    expected = sum(row['kind'] == 'Поступление' for row in bank_rows)
+    assert len(payments) == expected
 
 
 def test_every_inflow_is_classified(prepared):
-    _, known, payments = prepared
+    _, known, payments, _ = prepared
     for payment in payments:
         assert payment.order_no is None or payment.order_no in known
 
 
 def test_no_payment_earlier_than_its_order(prepared):
-    lines, _, payments = prepared
+    lines, _, payments, _ = prepared
     assert find_early_payments(lines, payments) == []
 
 
 def test_q2b_unidentified_count_and_sum(prepared):
-    lines, _, payments = prepared
+    lines, _, payments, _ = prepared
     _, count, total = solve_q2(lines, payments)
-    assert count == 16
-    assert total > 0
-    assert total == total.to_integral_value()
+    unidentified = [payment for payment in payments if payment.order_no is None]
+    assert count == len(unidentified)
+    assert total == sum((payment.amount for payment in unidentified), Decimal(0))
 
 
 def test_q2a_is_subset_of_paid_orders_and_sorted(prepared):
-    lines, _, payments = prepared
+    lines, _, payments, _ = prepared
     without, _, _ = solve_q2(lines, payments)
     paid = {line.order_no for line in lines if line.status == STATUS_PAID}
     assert set(without) <= paid
