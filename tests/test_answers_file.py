@@ -16,5 +16,6 @@ def test_answers_file_is_utf8_without_bom_and_has_notes():
     answers = json.loads(text)
     assert set(answers) == set(REQUIRED_KEYS)
     assert answers['run_command'] == 'python solve.py data/ --out answers.json'
-    assert answers['notes'].startswith('Номер заказа')
+    assert answers['notes'].startswith('Номера заказов принимаются')
     assert 'C0010' in answers['notes']
+    assert 'ручной проверки' in answers['notes']

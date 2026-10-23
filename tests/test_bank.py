@@ -12,8 +12,23 @@ def test_phone_fragments_are_not_order_numbers():
     assert extract_order_no('Предоплата заказ 775, тел. +7 964 847-86-23', KNOWN) == 775
 
 
-def test_invoice_number_is_matched():
+def test_invoice_reference_maps_to_order_number_under_documented_source_convention():
     assert extract_order_no('по счету №828 от 13.12.2025', KNOWN) == 828
+
+
+def test_conflicting_order_and_invoice_references_are_rejected():
+    with pytest.raises(ValueError, match='ambiguous order reference'):
+        extract_order_no('оплата заказа 75 по счету №828', KNOWN)
+
+
+def test_contract_number_is_not_assumed_to_be_an_order():
+    assert extract_order_no('оплата по договору №75', KNOWN) is None
+    assert extract_order_no('оплата по договору A-75', KNOWN) is None
+    assert extract_order_no('перевод, референс №75', KNOWN) is None
+
+
+def test_explicit_order_survives_another_contract_reference():
+    assert extract_order_no('оплата заказа 75 по договору A-828', KNOWN) == 75
 
 
 def test_number_outside_crm_is_unidentified():
@@ -27,6 +42,23 @@ def test_purpose_without_number_is_unidentified():
 def test_ambiguous_purpose_raises():
     with pytest.raises(ValueError):
         extract_order_no('заказ 75 и 528', KNOWN)
+
+
+def test_amount_matching_another_order_is_not_an_order_reference():
+    assert extract_order_no('Оплата заказа A-75, сумма 1000 руб.', {75, 1000}) == 75
+
+
+def test_numbered_invoice_reference_is_not_overridden_by_amount():
+    assert extract_order_no('По счету №828, сумма 1000 ₽', {828, 1000}) == 828
+
+
+def test_phone_in_eight_format_is_removed_before_number_matching():
+    purpose = 'Оплата заказа 75, телефон 8 (495) 123-45-67'
+    assert extract_order_no(purpose, {8, 45, 67, 75, 123, 495}) == 75
+
+
+def test_date_components_are_not_order_references():
+    assert extract_order_no('Оплата заказа 75 от 13/12/2025', KNOWN) == 75
 
 
 @pytest.fixture(scope='module')

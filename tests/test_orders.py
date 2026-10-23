@@ -60,17 +60,27 @@ def test_dedupe_keeps_latest_upload():
     assert lines[0].status == STATUS_PAID
 
 
-def test_dedupe_tie_break_is_deterministic():
+def test_dedupe_accepts_identical_latest_timestamp_independent_of_order():
+    same_time = '2026-10-01 09:00'
+    rows = [
+        record(**{'Выгружено': same_time}),
+        record(**{'Выгружено': same_time}),
+    ]
+    first = dedupe(build_lines(rows, MANAGERS, ARTICLES))
+    second = dedupe(build_lines(list(reversed(rows)), MANAGERS, ARTICLES))
+    assert len(first) == 1 and len(second) == 1
+    assert first[0].status == second[0].status == STATUS_PAID
+
+
+def test_dedupe_rejects_conflicting_latest_timestamp():
     same_time = '2026-10-01 09:00'
     rows = [
         record(**{'Статус': 'NEW', 'Выгружено': same_time}),
         record(**{'Статус': 'Оплачен', 'Выгружено': same_time}),
     ]
-    first = dedupe(build_lines(rows, MANAGERS, ARTICLES))
-    second = dedupe(build_lines(list(reversed(rows)), MANAGERS, ARTICLES))
-    assert len(first) == 1 and len(second) == 1
-    assert first[0].status == STATUS_PAID
-    assert second[0].status == STATUS_IN_PROGRESS
+    import pytest
+    with pytest.raises(ValueError, match='same latest upload time'):
+        dedupe(build_lines(rows, MANAGERS, ARTICLES))
 
 
 def test_dedupe_keeps_different_line_numbers():

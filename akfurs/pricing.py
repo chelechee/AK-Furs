@@ -25,15 +25,24 @@ def as_date(value):
 def build_history(history_rows):
     periods = {}
     for row in history_rows:
+        valid_from = as_date(row['valid_from'])
+        valid_to = as_date(row['valid_to'])
+        if valid_from is None:
+            raise ValueError('price period for {!r} has no start date'.format(row['article']))
+        if valid_to is not None and valid_to < valid_from:
+            raise ValueError('price period for {!r} ends before it starts'.format(row['article']))
         periods.setdefault(row['article'], []).append(PricePeriod(
             article=row['article'],
-            valid_from=as_date(row['valid_from']),
-            valid_to=as_date(row['valid_to']),
+            valid_from=valid_from,
+            valid_to=valid_to,
             recommended=Decimal(str(row['recommended'])),
             minimum=Decimal(str(row['minimum'])),
         ))
     for items in periods.values():
         items.sort(key=lambda period: period.valid_from)
+        for previous, current in zip(items, items[1:]):
+            if previous.valid_to is None or current.valid_from <= previous.valid_to:
+                raise ValueError('overlapping price periods for {!r}'.format(current.article))
     return periods
 
 

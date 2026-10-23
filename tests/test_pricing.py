@@ -36,6 +36,17 @@ def test_missing_period_raises(prepared):
         minimum_price(periods, 'UNKNOWN-01', date(2025, 5, 5))
 
 
+def test_overlapping_price_periods_are_rejected():
+    rows = [
+        {'article': 'X', 'valid_from': date(2025, 1, 1), 'valid_to': date(2025, 6, 30),
+         'recommended': 100, 'minimum': 80},
+        {'article': 'X', 'valid_from': date(2025, 6, 30), 'valid_to': None,
+         'recommended': 120, 'minimum': 90},
+    ]
+    with pytest.raises(ValueError, match='overlapping price periods'):
+        build_history(rows)
+
+
 def test_cancelled_lines_are_ignored(prepared):
     periods, _ = prepared
     line = SimpleNamespace(article='CHN-PAL-01', created=date(2025, 5, 5),

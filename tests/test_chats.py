@@ -9,6 +9,12 @@ from akfurs.io_loaders import read_chats
     'Когда сможете подъехать на примерку?',
     'Лучше приезжайте к нам в ателье на примерку, всё покажем вживую!',
     'Давайте я запишу вас на встречу в шоурум, там и подберём.',
+    'Будет удобно приехать к нам на примерку?',
+    'Предлагаю согласовать встречу в ателье.',
+    'Я записала вас на примерку.',
+    'Предлагаю посетить наш шоурум.',
+    'Давайте подберём дату визита.',
+    'Можете заглянуть к нам в ателье.',
 ])
 def test_invitation_templates(text):
     assert is_invitation(text)
@@ -27,6 +33,8 @@ def test_numbers_without_money_are_not_prices(text):
 @pytest.mark.parametrize('text', [
     'Цена с учётом всех работ: 53 000 ₽.',
     'Стоимость этой модели — 158 тыс..',
+    'Стоимость этой модели — 252000руб.',
+    'Цена — 252тыс.',
     'Изначальная стоимость 5 млн.',
     'Стоимость этой модели — 53 000.',
     'Цена с учётом всех работ: сто пятьдесят восемь тысяч рублей.',
@@ -34,6 +42,36 @@ def test_numbers_without_money_are_not_prices(text):
 ])
 def test_price_recognition(text):
     assert is_price(text)
+
+
+@pytest.mark.parametrize('text', [
+    'Модель 2024 года.',
+    'Артикул 252000.',
+    'Дом 12500.',
+    'Модель 2024 г.',
+    'Скидка 10% — действующее предложение.',
+    'Ваш бюджет — 300 000 ₽.',
+    'Вы назвали сумму 300 000 ₽.',
+])
+def test_non_price_numbers_are_not_prices(text):
+    assert not is_price(text)
+
+
+def test_price_without_currency_requires_price_context():
+    assert is_price('Стоимость этой модели — 53 000.')
+    assert not is_price('Модель 53 000.')
+    assert is_price('252 тысячи')
+
+
+def test_product_price_is_selected_after_customer_budget_reference():
+    from datetime import datetime
+    chat = {'chat_id': 'C9990', 'messages': [
+        {'at': datetime(2025, 1, 1, 10, 0), 'sender': 'Менеджер',
+         'text': 'Вы указали бюджет 300 000 ₽. Цена изделия — 400 000 ₽.'},
+        {'at': datetime(2025, 1, 1, 10, 1), 'sender': 'Менеджер',
+         'text': 'Приглашаю на примерку.'},
+    ]}
+    assert solve_q4([chat]) == []
 
 
 @pytest.fixture(scope='module')
@@ -106,3 +144,58 @@ def test_minimal_synthetic_violation():
         ],
     }
     assert solve_q4([chat]) == ['C0001']
+
+
+def test_negated_invitation_is_not_an_invitation():
+    assert not is_invitation('Не приглашаю вас на примерку.')
+
+
+def test_quoted_invitation_and_price_are_not_manager_events():
+    assert not is_invitation('Вы написали: «Приглашаю вас на примерку».')
+    assert not is_price('Клиент спрашивал: «Сколько стоит 252 000 ₽?»')
+
+
+def test_same_message_event_order_uses_text_position():
+    from datetime import datetime
+    stamp = datetime(2025, 1, 1, 10, 0)
+    invite_first = {'chat_id': 'C9991', 'messages': [
+        {'at': stamp, 'sender': 'Менеджер',
+         'text': 'Приглашаю на примерку; цена — 252 000 ₽.'},
+    ]}
+    price_first = {'chat_id': 'C9992', 'messages': [
+        {'at': stamp, 'sender': 'Менеджер',
+         'text': 'Цена — 252 000 ₽; приглашаю на примерку.'},
+    ]}
+    assert solve_q4([invite_first]) == ['C9991']
+    assert solve_q4([price_first]) == []
+
+
+def test_attached_currency_keeps_amount_position_in_same_message():
+    from datetime import datetime
+    chat = {'chat_id': 'C9989', 'messages': [
+        {'at': datetime(2025, 1, 1, 10, 0), 'sender': 'Менеджер',
+         'text': 'Приглашаю на примерку, цена 252000руб.'},
+    ]}
+    assert solve_q4([chat]) == ['C9989']
+
+
+def test_q4_sorts_events_by_timestamp_not_input_order():
+    from datetime import datetime
+    chat = {'chat_id': 'C9993', 'messages': [
+        {'at': datetime(2025, 1, 1, 10, 0), 'sender': 'Менеджер',
+         'text': 'Приглашаю на примерку.'},
+        {'at': datetime(2025, 1, 1, 8, 0), 'sender': 'Менеджер',
+         'text': 'Цена — 252 000 ₽.'},
+    ]}
+    assert solve_q4([chat]) == []
+
+
+def test_model_year_does_not_hide_a_missing_price_violation():
+    from datetime import datetime
+    chat = {'chat_id': 'C9994', 'messages': [
+        {'at': datetime(2025, 1, 1, 10, 0), 'sender': 'Менеджер',
+         'text': 'Модель 2024 года.'},
+        {'at': datetime(2025, 1, 1, 10, 1), 'sender': 'Менеджер',
+         'text': 'Приглашаю на примерку.'},
+    ]}
+    assert solve_q4([chat]) == ['C9994']

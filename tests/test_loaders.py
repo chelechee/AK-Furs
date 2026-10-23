@@ -1,6 +1,10 @@
+import zipfile
+
 import pytest
 
 from akfurs.io_loaders import (
+    DATA_FILES,
+    find_data_dir,
     load_dataset,
     parse_chat,
     read_bank,
@@ -94,3 +98,43 @@ def test_parse_chat_rejects_unknown_message_line():
     text = 'Чат C9999 | заказ A-1 | менеджер X | клиент Y\nэто не сообщение'
     with pytest.raises(ValueError, match='unrecognized message'):
         parse_chat(text, 'x.txt')
+
+
+def test_parse_chat_error_does_not_echo_message_text():
+    private_text = 'Клиент: секретная тестовая реплика'
+    text = 'Чат C9999 | заказ A-1 | менеджер X | клиент Y\n' + private_text
+    with pytest.raises(ValueError) as error:
+        parse_chat(text, 'x.txt')
+    assert private_text not in str(error.value)
+
+
+def test_read_chats_rejects_duplicate_chat_ids(tmp_path):
+    archive_path = tmp_path / 'duplicate.zip'
+    chat_text = (
+        'Чат C9999 | заказ A-1 | менеджер X | клиент Y\n'
+        '[01.01.2025 10:00] Менеджер: Здравствуйте\n'
+    )
+    with zipfile.ZipFile(archive_path, 'w') as archive:
+        archive.writestr('one.txt', chat_text)
+        archive.writestr('two.txt', chat_text)
+    with pytest.raises(ValueError, match='duplicate chat ID'):
+        read_chats(archive_path)
+
+
+def test_parse_chat_rejects_filename_header_id_mismatch():
+    text = (
+        'Чат C9999 | заказ A-1 | менеджер X | клиент Y\n'
+        '[01.01.2025 10:00] Менеджер: Здравствуйте\n'
+    )
+    with pytest.raises(ValueError, match='chat ID mismatch'):
+        parse_chat(text, 'C0001.txt')
+
+
+def test_find_data_dir_rejects_multiple_complete_datasets(tmp_path):
+    for name in ('first', 'second'):
+        folder = tmp_path / name
+        folder.mkdir()
+        for filename in DATA_FILES:
+            (folder / filename).touch()
+    with pytest.raises(ValueError, match='multiple complete datasets'):
+        find_data_dir(tmp_path)

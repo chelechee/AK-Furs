@@ -47,6 +47,9 @@ def build_lines(records, manager_map, article_map):
 
         price = parse_money(row['Цена за ед.'])
         qty = int(str(row['Кол-во']).strip())
+        if qty <= 0:
+            raise ValueError('quantity must be positive for order line {!r}/{!r}'.format(
+                row['Номер заказа'], row['№ строки']))
         discount_raw = row['Скидка'].strip()
 
         lines.append(OrderLine(
@@ -74,9 +77,21 @@ def dedupe(lines):
     for line in lines:
         key = (line.order_no, line.line_no)
         current = best.get(key)
-        if current is None or (line.uploaded, line.row_index) > (current.uploaded, current.row_index):
+        if current is None or line.uploaded > current.uploaded:
             best[key] = line
+        elif line.uploaded == current.uploaded and _dedupe_signature(line) != _dedupe_signature(current):
+            raise ValueError(
+                'conflicting duplicate order line {!r} has the same latest upload time {!r}'.format(
+                    key, line.uploaded))
     return sorted(best.values(), key=lambda line: (line.order_no, line.line_no))
+
+
+def _dedupe_signature(line):
+    """Fields that can affect Q1–Q3 or the manager breakdown."""
+    return (
+        line.created, line.manager, line.article, line.qty, line.price,
+        line.discount_raw, line.unit_after, line.status,
+    )
 
 
 def summarise(lines):

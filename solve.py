@@ -4,10 +4,39 @@ import sys
 import tempfile
 import zipfile
 from contextlib import contextmanager
+from decimal import Decimal
 from pathlib import Path
 
 from akfurs.io_loaders import load_dataset
 from akfurs.report import build_answers, validate
+
+
+def _json_value(value, level=0, indent=2):
+    """Serialize Decimal as an exact JSON number without converting via float."""
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError('non-finite Decimal cannot be written to JSON')
+        if value == value.to_integral_value():
+            return str(int(value))
+        text = format(value, 'f')
+        return text.rstrip('0').rstrip('.') if '.' in text else text
+    if isinstance(value, dict):
+        if not value:
+            return '{}'
+        pad = ' ' * (indent * (level + 1))
+        close_pad = ' ' * (indent * level)
+        entries = [pad + json.dumps(key, ensure_ascii=False) + ': '
+                   + _json_value(item, level + 1, indent)
+                   for key, item in value.items()]
+        return '{\n' + ',\n'.join(entries) + '\n' + close_pad + '}'
+    if isinstance(value, (list, tuple)):
+        if not value:
+            return '[]'
+        pad = ' ' * (indent * (level + 1))
+        close_pad = ' ' * (indent * level)
+        entries = [pad + _json_value(item, level + 1, indent) for item in value]
+        return '[\n' + ',\n'.join(entries) + '\n' + close_pad + ']'
+    return json.dumps(value, ensure_ascii=False)
 
 
 @contextmanager
@@ -45,7 +74,7 @@ def _run(argv):
     with _data_source(args[0]) as data_dir:
         dataset = load_dataset(data_dir)
     answers = validate(build_answers(dataset))
-    text = json.dumps(answers, ensure_ascii=False, indent=2) + '\n'
+    text = _json_value(answers, indent=2) + '\n'
 
     if out_path:
         with open(out_path, 'w', encoding='utf-8', newline='\n') as handle:

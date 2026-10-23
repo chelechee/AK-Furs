@@ -9,6 +9,7 @@ from akfurs.normalize import (
     STATUS_PAID,
     STATUS_REFUND,
     build_manager_map,
+    build_article_map,
     normalize_person,
     normalize_status,
     order_no,
@@ -19,7 +20,8 @@ from akfurs.normalize import (
 
 
 def test_order_no_collapses_all_spellings():
-    for raw in ('A-00075', 'А-75', 'a-75', 'A75', ' a-372', 'A-00922'):
+    for raw in ('A-00075', 'А-75', 'a-75', 'A75', ' a-372', 'A-00922',
+                'A–75', 'A 75', '№ 00075', 'заказ 75'):
         assert isinstance(order_no(raw), int)
     assert {order_no(x) for x in ('A-00075', 'А-75', 'a-75', 'A75')} == {75}
 
@@ -27,6 +29,11 @@ def test_order_no_collapses_all_spellings():
 def test_order_no_rejects_values_without_digits():
     with pytest.raises(ValueError):
         order_no('без номера')
+
+
+def test_order_no_rejects_unrecognized_composite_identifiers():
+    with pytest.raises(ValueError):
+        order_no('A-75/1')
 
 
 @pytest.mark.parametrize('raw,expected', [
@@ -87,6 +94,21 @@ def test_absolute_discount_is_spread_over_quantity():
     assert result == (Decimal('100000') - Decimal('2100')) / 2
 
 
+def test_discount_allows_space_before_percent_sign():
+    assert unit_price_after_discount(Decimal('100000'), 1, '10 %') == Decimal('90000')
+
+
+@pytest.mark.parametrize('discount', ['-1%', '101%', '-1', '100001'])
+def test_discount_rejects_out_of_range_values(discount):
+    with pytest.raises(ValueError):
+        unit_price_after_discount(Decimal('100000'), 1, discount)
+
+
+def test_discount_rejects_zero_quantity():
+    with pytest.raises(ValueError, match='quantity must be positive'):
+        unit_price_after_discount(Decimal('100000'), 0, '10%')
+
+
 def test_empty_discount_keeps_price():
     assert unit_price_after_discount(Decimal('50000'), 1, '') == Decimal('50000')
 
@@ -120,3 +142,19 @@ def test_manager_map_ignores_case_and_spaces():
     assert mapping[normalize_person(' В. Белова')] == 'Вероника Белова'
     assert mapping[normalize_person('полина орлова ')] == 'Полина Орлова'
     assert mapping[normalize_person('ВЕРОНИКА')] == 'Вероника Белова'
+
+
+def test_manager_map_rejects_alias_collisions():
+    with pytest.raises(ValueError, match='maps to both'):
+        build_manager_map([
+            ('Менеджер Один', 'Ирина'),
+            ('Менеджер Два', 'Ирина'),
+        ])
+
+
+def test_article_renames_resolve_chains_and_reject_cycles():
+    assert build_article_map([('OLD', 'MID'), ('MID', 'NEW')]) == {
+        'OLD': 'NEW', 'MID': 'NEW'
+    }
+    with pytest.raises(ValueError, match='cycle'):
+        build_article_map([('A', 'B'), ('B', 'A')])

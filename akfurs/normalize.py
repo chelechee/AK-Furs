@@ -26,10 +26,15 @@ _STATUS_ALIASES = {
 
 
 def order_no(value):
-    digits = re.sub(r'\D', '', str(value))
-    if not digits:
-        raise ValueError('order number without digits: {!r}'.format(value))
-    return int(digits)
+    raw = str(value).strip()
+    match = re.fullmatch(
+        r'(?:(?:заказ)\s*|№\s*)?(?:[aа]\s*[-–—]?\s*)?0*(\d+)',
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        raise ValueError('invalid order number format: {!r}'.format(value))
+    return int(match.group(1))
 
 
 def parse_date(value):
@@ -140,19 +145,30 @@ def parse_discount(value):
     raw = str(value).strip()
     if not raw:
         return None, Decimal(0)
-    if raw.endswith('%'):
-        percent = Decimal(raw[:-1].replace(',', '.').strip())
+    percent_match = re.fullmatch(r'([+-]?\d+(?:[,.]\d+)?)\s*%', raw)
+    if percent_match:
+        percent = Decimal(percent_match.group(1).replace(',', '.'))
+        if percent < 0 or percent > 100:
+            raise ValueError('percentage discount must be between 0 and 100: {!r}'.format(value))
         return 'percent', percent
-    return 'absolute', parse_money(raw)
+    amount = parse_money(raw)
+    if amount < 0:
+        raise ValueError('absolute discount must be non-negative: {!r}'.format(value))
+    return 'absolute', amount
 
 
 def unit_price_after_discount(price, qty, discount_raw):
+    if qty <= 0:
+        raise ValueError('quantity must be positive, got {!r}'.format(qty))
     kind, amount = parse_discount(discount_raw)
     if kind is None:
         return price
     if kind == 'percent':
         return price * (Decimal(1) - amount / Decimal(100))
-    return (price * Decimal(qty) - amount) / Decimal(qty)
+    line_total = price * Decimal(qty)
+    if amount > line_total:
+        raise ValueError('absolute discount exceeds line total')
+    return (line_total - amount) / Decimal(qty)
 
 
 def normalize_status(value):
@@ -169,9 +185,35 @@ def build_manager_map(manager_rows):
     for row in manager_rows:
         canonical = str(row[0]).strip()
         for variant in str(row[1]).split('|'):
-            mapping[normalize_person(variant)] = canonical
+            key = normalize_person(variant)
+            previous = mapping.get(key)
+            if previous is not None and previous != canonical:
+                raise ValueError('manager alias {!r} maps to both {!r} and {!r}'.format(
+                    variant.strip(), previous, canonical))
+            mapping[key] = canonical
     return mapping
 
 
 def build_article_map(rename_rows):
-    return {str(row[0]).strip(): str(row[1]).strip() for row in rename_rows if row[0]}
+    direct = {}
+    for row in rename_rows:
+        if not row[0]:
+            continue
+        old = str(row[0]).strip()
+        new = str(row[1]).strip()
+        previous = direct.get(old)
+        if previous is not None and previous != new:
+            raise ValueError('article {!r} has conflicting rename targets'.format(old))
+        direct[old] = new
+
+    resolved = {}
+    for old in direct:
+        current = old
+        seen = set()
+        while current in direct:
+            if current in seen:
+                raise ValueError('article rename cycle involving {!r}'.format(current))
+            seen.add(current)
+            current = direct[current]
+        resolved[old] = current
+    return resolved

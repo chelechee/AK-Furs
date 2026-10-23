@@ -1,7 +1,9 @@
 import pytest
+from decimal import Decimal
 
 from akfurs.io_loaders import load_dataset
 from akfurs.report import build_answers, validate
+from solve import _json_value
 
 
 def valid_answers():
@@ -184,4 +186,42 @@ def test_q3_total_must_match_breakdown():
     answers = valid_answers()
     answers['q3_price_violation_lines_total'] = 4
     with pytest.raises(ValueError):
+        validate(answers)
+
+
+def test_fractional_payment_sum_is_preserved_as_exact_json_number(data_dir):
+    import json
+    dataset = load_dataset(data_dir)
+    dataset['bank'].append({
+        'date_raw': '01.10.2026',
+        'time_raw': '12:00',
+        'amount_raw': '1,49',
+        'currency': 'RUR',
+        'kind': 'Поступление',
+        'counterparty': 'synthetic',
+        'purpose': 'payment without any CRM order reference',
+    })
+    answers = validate(build_answers(dataset))
+    assert answers['q2b_unidentified_payments_sum_rub'] == Decimal('3437101.49')
+    serialized = _json_value(answers)
+    decoded = json.loads(serialized, parse_float=Decimal)
+    assert decoded['q2b_unidentified_payments_sum_rub'] == Decimal('3437101.49')
+
+
+def test_validator_rejects_non_finite_payment_sum():
+    answers = valid_answers()
+    answers['q2b_unidentified_payments_sum_rub'] = Decimal('NaN')
+    with pytest.raises(ValueError, match='finite'):
+        validate(answers)
+
+
+def test_validator_rejects_duplicate_result_ids():
+    answers = valid_answers()
+    answers['q2a_paid_orders_without_payment'] = [2, 2]
+    with pytest.raises(ValueError, match='must be unique'):
+        validate(answers)
+
+    answers = valid_answers()
+    answers['q4_chats_meeting_before_price'] = ['C0001', 'C0001']
+    with pytest.raises(ValueError, match='must be unique'):
         validate(answers)

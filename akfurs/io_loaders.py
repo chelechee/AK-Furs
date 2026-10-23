@@ -207,12 +207,20 @@ def read_pricebook(path):
 
 def read_chats(path):
     chats = []
+    seen_ids = set()
     with zipfile.ZipFile(path) as archive:
         for info in archive.infolist():
             if not info.filename.lower().endswith('.txt'):
                 continue
-            text = archive.read(info).decode('utf-8-sig')
-            chats.append(parse_chat(text, info.filename))
+            try:
+                text = archive.read(info).decode('utf-8-sig')
+            except UnicodeDecodeError as error:
+                raise ValueError('chat file is not valid UTF-8: {}'.format(info.filename)) from error
+            chat = parse_chat(text, info.filename)
+            if chat['chat_id'] in seen_ids:
+                raise ValueError('duplicate chat ID in archive: {}'.format(chat['chat_id']))
+            seen_ids.add(chat['chat_id'])
+            chats.append(chat)
     return chats
 
 
@@ -224,7 +232,10 @@ def parse_chat(text, filename):
     header = lines[0].strip()
     chat_match = re.search(r'Чат\s+(C\d+)', header)
     if not chat_match:
-        raise ValueError('chat id not found in header: {!r}'.format(header))
+        raise ValueError('chat ID not found in header for file {}'.format(filename))
+    filename_match = re.search(r'(C\d+)', Path(filename).name)
+    if filename_match and filename_match.group(1) != chat_match.group(1):
+        raise ValueError('chat ID mismatch between filename and header: {}'.format(filename))
 
     order_match = re.search(r'заказ\s+([A-Za-zА-Яа-яЁё]-?\s?\d+)', header)
     manager_match = re.search(r'менеджер\s+(.+)$', header)
@@ -238,8 +249,7 @@ def parse_chat(text, filename):
         match = _MESSAGE_RE.match(text)
         if not match:
             raise ValueError(
-                'unrecognized message line {} in {}: {!r}'.format(
-                    line_number, filename, text))
+                'unrecognized message format at line {} in {}'.format(line_number, filename))
         stamp = parse_datetime('{} {}'.format(match.group(1), match.group(2)))
         messages.append({'at': stamp, 'sender': match.group(3), 'text': match.group(4).strip()})
 
@@ -267,7 +277,10 @@ def find_data_dir(root):
     if not candidates:
         raise FileNotFoundError(
             'data files not found under {}: {}'.format(root, ', '.join(DATA_FILES)))
-    return sorted(candidates, key=lambda path: (len(path.parts), str(path)))[0]
+    if len(candidates) > 1:
+        locations = ', '.join(str(path.relative_to(root)) for path in candidates)
+        raise ValueError('multiple complete datasets found under {}: {}'.format(root, locations))
+    return candidates[0]
 
 
 def load_dataset(data_dir):
